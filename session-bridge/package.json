@@ -2,7 +2,7 @@
   "name": "session-bridge",
   "displayName": "Session bridge",
   "version": "0.0.1",
-  "description": "A basic Plasmo extension.",
+  "description": "vibe",
   "author": "ilihuaxi@gmail.com",
   "scripts": {
     "dev": "plasmo dev",
