@@ -27,13 +27,17 @@
   },
   "manifest": {
     "host_permissions": [
-      "https://*/*"
+      "https://*/*",
+      "http://*/*"
     ],
     "permissions": [
       "cookies",
       "activeTab",
       "storage",
-      "scripting"
+      "scripting",
+      "clipboardRead",
+      "clipboardWrite",
+      "tabs"
     ]
   }
 }
