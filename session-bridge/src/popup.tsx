@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { ActionButton } from "~components/ActionButton"
-import { getSession, SessionManagerError } from "~lib/sessionManager"
+import { getSession, setSession, SessionManagerError, validateSessionData } from "~lib/sessionManager"
 import type { SessionData } from "~lib/sessionManager"
 
 import "~style.css"
@@ -45,13 +45,63 @@ function IndexPopup() {
     }
   }
 
-  const handleApplySession = () => {
-    // TODO: 实现会话应用逻辑 (Story 1.3)
-    console.log("Apply Session clicked")
-    setStatus("应用会话功能即将推出...")
-    setTimeout(() => {
-      setStatus("就绪")
-    }, 2000)
+  const handleApplySession = async () => {
+    setIsLoading(true)
+    setStatus("正在读取剪贴板...")
+    
+    try {
+      // 从剪贴板读取会话数据
+      const clipboardText = await navigator.clipboard.readText()
+      
+      if (!clipboardText.trim()) {
+        throw new Error("剪贴板为空，请先复制会话数据")
+      }
+      
+      setStatus("正在解析会话数据...")
+      
+      // 解析 JSON 数据
+      let sessionData: SessionData
+      try {
+        sessionData = JSON.parse(clipboardText)
+      } catch (parseError) {
+        throw new Error("剪贴板内容不是有效的 JSON 格式")
+      }
+      
+      // 验证会话数据格式
+      if (!validateSessionData(sessionData)) {
+        throw new Error("会话数据格式无效，请确保数据完整")
+      }
+      
+      setStatus("正在应用会话数据...")
+      
+      // 应用会话数据
+      await setSession(sessionData)
+      
+      setStatus(`会话已应用！来源: ${sessionData.domain}`)
+      
+      // 显示成功状态3秒后重置
+      setTimeout(() => {
+        setStatus("就绪")
+      }, 3000)
+      
+    } catch (error) {
+      console.error("应用会话失败:", error)
+      
+      if (error instanceof SessionManagerError) {
+        setStatus(`错误: ${error.message}`)
+      } else if (error instanceof Error) {
+        setStatus(`错误: ${error.message}`)
+      } else {
+        setStatus("应用会话失败，请重试")
+      }
+      
+      // 显示错误状态5秒后重置
+      setTimeout(() => {
+        setStatus("就绪")
+      }, 5000)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (

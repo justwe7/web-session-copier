@@ -165,6 +165,199 @@ export async function getSession(): Promise<SessionData> {
 }
 
 /**
+ * 设置指定的 Cookies
+ */
+async function setCookies(cookies: chrome.cookies.Cookie[], targetDomain: string): Promise<void> {
+  try {
+    const setPromises = cookies.map(async (cookie) => {
+      // 构建 cookie 设置参数
+      const details: chrome.cookies.SetDetails = {
+        url: `https://${targetDomain}${cookie.path || '/'}`,
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain,
+        path: cookie.path,
+        secure: cookie.secure,
+        httpOnly: cookie.httpOnly,
+        sameSite: cookie.sameSite,
+      };
+
+      // 如果有过期时间，设置过期时间
+      if (cookie.expirationDate) {
+        details.expirationDate = cookie.expirationDate;
+      }
+
+      try {
+        await chrome.cookies.set(details);
+        console.log(`Cookie 设置成功: ${cookie.name}`);
+      } catch (error) {
+        console.warn(`Cookie 设置失败: ${cookie.name}`, error);
+        throw new SessionManagerError(
+          `设置 Cookie "${cookie.name}" 失败: ${error instanceof Error ? error.message : '未知错误'}`,
+          'SET_COOKIE_FAILED'
+        );
+      }
+    });
+
+    await Promise.allSettled(setPromises);
+    console.log(`成功处理 ${cookies.length} 个 Cookie`);
+  } catch (error) {
+    throw new SessionManagerError(
+      `批量设置 Cookies 失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      'SET_COOKIES_FAILED'
+    );
+  }
+}
+
+/**
+ * 通过 content script 设置 localStorage 数据
+ */
+async function setLocalStorage(data: Record<string, string>): Promise<void> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab.id) {
+      throw new SessionManagerError('无法获取当前标签页 ID', 'NO_TAB_ID');
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (storageData: Record<string, string>) => {
+        try {
+          // 清空现有 localStorage
+          localStorage.clear();
+          
+          // 设置新数据
+          for (const [key, value] of Object.entries(storageData)) {
+            localStorage.setItem(key, value);
+          }
+          
+          console.log(`LocalStorage 设置成功，共 ${Object.keys(storageData).length} 项`);
+          return { success: true, count: Object.keys(storageData).length };
+        } catch (error) {
+          console.error('LocalStorage 设置失败:', error);
+          throw error;
+        }
+      },
+      args: [data]
+    });
+
+    console.log(`LocalStorage 数据应用成功`);
+  } catch (error) {
+    throw new SessionManagerError(
+      `设置 LocalStorage 失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      'SET_LOCALSTORAGE_FAILED'
+    );
+  }
+}
+
+/**
+ * 通过 content script 设置 sessionStorage 数据
+ */
+async function setSessionStorage(data: Record<string, string>): Promise<void> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab.id) {
+      throw new SessionManagerError('无法获取当前标签页 ID', 'NO_TAB_ID');
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (storageData: Record<string, string>) => {
+        try {
+          // 清空现有 sessionStorage
+          sessionStorage.clear();
+          
+          // 设置新数据
+          for (const [key, value] of Object.entries(storageData)) {
+            sessionStorage.setItem(key, value);
+          }
+          
+          console.log(`SessionStorage 设置成功，共 ${Object.keys(storageData).length} 项`);
+          return { success: true, count: Object.keys(storageData).length };
+        } catch (error) {
+          console.error('SessionStorage 设置失败:', error);
+          throw error;
+        }
+      },
+      args: [data]
+    });
+
+    console.log(`SessionStorage 数据应用成功`);
+  } catch (error) {
+    throw new SessionManagerError(
+      `设置 SessionStorage 失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      'SET_SESSIONSTORAGE_FAILED'
+    );
+  }
+}
+
+/**
+ * 应用会话数据到当前页面
+ * 包括 Cookies, LocalStorage, SessionStorage
+ */
+export async function setSession(sessionData: SessionData): Promise<void> {
+  try {
+    // 验证输入数据
+    if (!validateSessionData(sessionData)) {
+      throw new SessionManagerError('会话数据格式无效', 'INVALID_SESSION_DATA');
+    }
+
+    // 获取当前域名以验证匹配
+    const currentDomain = await getCurrentDomain();
+    
+    // 可选：验证域名匹配（可以注释掉以支持跨域应用）
+    // if (sessionData.domain !== currentDomain) {
+    //   throw new SessionManagerError(
+    //     `域名不匹配: 会话数据来自 ${sessionData.domain}，当前页面为 ${currentDomain}`,
+    //     'DOMAIN_MISMATCH'
+    //   );
+    // }
+
+    console.log('开始应用会话数据:', {
+      targetDomain: currentDomain,
+      sourceDomain: sessionData.domain,
+      cookiesCount: sessionData.cookies.length,
+      localStorageKeys: Object.keys(sessionData.localStorage).length,
+      sessionStorageKeys: Object.keys(sessionData.sessionStorage).length
+    });
+
+    // 并行应用所有数据以提高性能
+    const results = await Promise.allSettled([
+      setCookies(sessionData.cookies, currentDomain),
+      setLocalStorage(sessionData.localStorage),
+      setSessionStorage(sessionData.sessionStorage)
+    ]);
+
+    // 检查结果并报告任何失败
+    const failures: string[] = [];
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        const operations = ['Cookies', 'LocalStorage', 'SessionStorage'];
+        failures.push(`${operations[index]}: ${result.reason.message}`);
+      }
+    });
+
+    if (failures.length > 0) {
+      throw new SessionManagerError(
+        `部分会话数据应用失败: ${failures.join('; ')}`,
+        'PARTIAL_SESSION_APPLY_FAILED'
+      );
+    }
+
+    console.log('会话数据应用成功');
+  } catch (error) {
+    if (error instanceof SessionManagerError) {
+      throw error;
+    }
+    
+    throw new SessionManagerError(
+      `应用会话数据失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      'SET_SESSION_FAILED'
+    );
+  }
+}
+
+/**
  * 验证会话数据的完整性
  */
 export function validateSessionData(data: any): data is SessionData {
@@ -177,4 +370,42 @@ export function validateSessionData(data: any): data is SessionData {
     typeof data.domain === 'string' &&
     typeof data.timestamp === 'number'
   );
+}
+
+/**
+ * 清除当前页面的所有会话数据
+ */
+export async function clearSession(): Promise<void> {
+  try {
+    const currentDomain = await getCurrentDomain();
+    
+    // 清除 Cookies
+    const cookies = await chrome.cookies.getAll({ domain: currentDomain });
+    const removeCookiePromises = cookies.map(cookie => 
+      chrome.cookies.remove({
+        url: `https://${currentDomain}${cookie.path}`,
+        name: cookie.name
+      })
+    );
+    
+    // 清除 Storage
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab.id) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          localStorage.clear();
+          sessionStorage.clear();
+        }
+      });
+    }
+
+    await Promise.all(removeCookiePromises);
+    console.log('会话数据清除成功');
+  } catch (error) {
+    throw new SessionManagerError(
+      `清除会话数据失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      'CLEAR_SESSION_FAILED'
+    );
+  }
 }
