@@ -79,7 +79,7 @@ incognito-session-bridge/
 | 2025-01-XX | 创建故事 | BMad Master |
 
 ## Status
-Draft
+Approved
 
 ---
 
