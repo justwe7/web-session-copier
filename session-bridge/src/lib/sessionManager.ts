@@ -41,18 +41,127 @@ async function getCurrentDomain(): Promise<string> {
 }
 
 /**
- * 读取指定域名的所有 Cookies
+ * 读取指定域名的所有 Cookies（增强版）
  */
 async function getCookies(domain: string): Promise<chrome.cookies.Cookie[]> {
   try {
-    const cookies = await chrome.cookies.getAll({ domain });
-    return cookies;
+    // 获取当前标签页的完整 URL
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab.url) {
+      throw new SessionManagerError('无法获取当前标签页 URL', 'NO_TAB_URL');
+    }
+
+    const url = new URL(tab.url);
+    
+    // 尝试多种方式获取 Cookie
+    const cookieSets: chrome.cookies.Cookie[][] = [];
+    
+    // 1. 按域名获取
+    try {
+      const domainCookies = await chrome.cookies.getAll({ domain: domain });
+      cookieSets.push(domainCookies);
+    } catch (error) {
+      console.warn('按域名获取 Cookie 失败:', error);
+    }
+    
+    // 2. 按 URL 获取
+    try {
+      const urlCookies = await chrome.cookies.getAll({ url: tab.url });
+      cookieSets.push(urlCookies);
+    } catch (error) {
+      console.warn('按 URL 获取 Cookie 失败:', error);
+    }
+    
+    // 3. 尝试获取主域名的 Cookie
+    try {
+      const parts = domain.split('.');
+      if (parts.length > 2) {
+        const rootDomain = '.' + parts.slice(-2).join('.');
+        const rootCookies = await chrome.cookies.getAll({ domain: rootDomain });
+        cookieSets.push(rootCookies);
+      }
+    } catch (error) {
+      console.warn('按根域名获取 Cookie 失败:', error);
+    }
+    
+    // 4. 通过 content script 获取 document.cookie
+    try {
+      if (tab.id) {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            try {
+              return document.cookie;
+            } catch (error) {
+              return '';
+            }
+          }
+        });
+        
+        const documentCookies = results[0]?.result || '';
+        if (documentCookies) {
+          console.log('从 document.cookie 获取到:', documentCookies);
+          // 解析 document.cookie 字符串并转换为 Cookie 对象
+          const parsedCookies = parseDocumentCookies(documentCookies, domain);
+          cookieSets.push(parsedCookies);
+        }
+      }
+    } catch (error) {
+      console.warn('通过 content script 获取 Cookie 失败:', error);
+    }
+    
+    // 合并并去重所有 Cookie
+    const allCookies = new Map<string, chrome.cookies.Cookie>();
+    
+    cookieSets.forEach(cookies => {
+      cookies.forEach(cookie => {
+        const key = `${cookie.name}-${cookie.domain}-${cookie.path}`;
+        if (!allCookies.has(key) || cookie.value) {
+          allCookies.set(key, cookie);
+        }
+      });
+    });
+    
+    const finalCookies = Array.from(allCookies.values());
+    console.log(`成功获取 ${finalCookies.length} 个 Cookie`);
+    
+    return finalCookies;
   } catch (error) {
     throw new SessionManagerError(
       `读取 Cookies 失败: ${error instanceof Error ? error.message : '未知错误'}`,
       'GET_COOKIES_FAILED'
     );
   }
+}
+
+/**
+ * 解析 document.cookie 字符串为 Cookie 对象数组
+ */
+function parseDocumentCookies(cookieString: string, domain: string): chrome.cookies.Cookie[] {
+  if (!cookieString) return [];
+  
+  const cookies: chrome.cookies.Cookie[] = [];
+  const cookiePairs = cookieString.split(';');
+  
+  cookiePairs.forEach(pair => {
+    const [name, value] = pair.trim().split('=');
+    if (name && value !== undefined) {
+      cookies.push({
+        name: name.trim(),
+        value: value.trim(),
+        domain: domain,
+        hostOnly: false,
+        path: '/',
+        secure: false,
+        httpOnly: false,
+        sameSite: 'no_restriction',
+        session: true,
+        storeId: 'default'
+      });
+    }
+  });
+  
+  return cookies;
 }
 
 /**
