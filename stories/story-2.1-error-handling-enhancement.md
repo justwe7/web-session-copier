@@ -11,6 +11,7 @@
 - [ ] 剪贴板数据格式无效时，提供具体的错误说明
 - [ ] 网络或API调用失败时，提供重试机制
 - [ ] 插件权限不足时，显示权限配置指导
+- [ ] **HttpOnly Cookie 限制处理**: 当遇到 HttpOnly Cookie 时，提供明确的说明和替代方案
 
 ## Dev Notes
 ### 技术要求
@@ -25,6 +26,7 @@ enum ErrorType {
   PERMISSION_DENIED = 'permission_denied',
   INVALID_DATA = 'invalid_data',
   NETWORK_ERROR = 'network_error',
+  HTTPONLY_COOKIE_LIMITATION = 'httponly_cookie_limitation',
   UNKNOWN_ERROR = 'unknown_error'
 }
 
@@ -33,6 +35,7 @@ interface ErrorHandler {
   message: string;
   action?: string;
   retry?: boolean;
+  limitation?: string; // 用于说明限制原因
 }
 ```
 
@@ -49,6 +52,10 @@ interface ErrorHandler {
   - [ ] 增强JSON格式验证
   - [ ] 添加数据完整性检查
   - [ ] 实现数据修复建议
+  - [ ] **HttpOnly Cookie 检测和处理**
+    - [ ] 在读取会话时检测 HttpOnly Cookie
+    - [ ] 在应用会话时标记 HttpOnly Cookie 的限制
+    - [ ] 提供用户友好的说明和替代方案
 - [ ] 用户体验优化
   - [ ] 设计友好的错误提示UI
   - [ ] 添加重试按钮和机制

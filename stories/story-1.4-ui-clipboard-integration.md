@@ -62,7 +62,7 @@
 | 2025-01-XX | 创建故事 | BMad Master |
 
 ## Status
-Completed
+Completed (Fixed Cookie Setting Bug)
 
 ---
 
@@ -89,3 +89,4 @@ BMad Master Task Executor (Claude Sonnet 4)
 - ✅ 实现了异步状态管理和自动重置功能
 - ✅ 优化了用户体验，提供清晰的操作指导和反馈
 - ✅ 所有剪贴板操作都经过安全性和可用性检查
+- 🔧 **重要修复**: 解决了 chrome.cookies.set API 在开发者工具中不可见的问题，改用 JavaScript 脚本注入方式设置 Cookie，确保完整的数据写入和可见性

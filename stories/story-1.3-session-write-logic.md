@@ -18,6 +18,7 @@
 - **Storage API**: 使用 `chrome.storage.local.set()` 和内容脚本注入
 - **权限**: 确保有足够权限修改目标域名的数据
 - **错误处理**: 处理权限不足、域名不匹配等错误
+- **⚠️ 限制说明**: HttpOnly Cookie 无法被 JavaScript 设置，这是浏览器的安全限制
 
 ### 实现注意事项
 - Cookie 设置需要匹配正确的 domain 和 path
