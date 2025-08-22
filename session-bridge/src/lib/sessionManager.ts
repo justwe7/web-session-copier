@@ -41,127 +41,19 @@ async function getCurrentDomain(): Promise<string> {
 }
 
 /**
- * 读取指定域名的所有 Cookies（增强版）
+ * 读取指定域名的所有 Cookies
  */
 async function getCookies(domain: string): Promise<chrome.cookies.Cookie[]> {
   try {
-    // 获取当前标签页的完整 URL
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab.url) {
-      throw new SessionManagerError('无法获取当前标签页 URL', 'NO_TAB_URL');
-    }
-
-    const url = new URL(tab.url);
-    
-    // 尝试多种方式获取 Cookie
-    const cookieSets: chrome.cookies.Cookie[][] = [];
-    
-    // 1. 按域名获取
-    try {
-      const domainCookies = await chrome.cookies.getAll({ domain: domain });
-      cookieSets.push(domainCookies);
-    } catch (error) {
-      console.warn('按域名获取 Cookie 失败:', error);
-    }
-    
-    // 2. 按 URL 获取
-    try {
-      const urlCookies = await chrome.cookies.getAll({ url: tab.url });
-      cookieSets.push(urlCookies);
-    } catch (error) {
-      console.warn('按 URL 获取 Cookie 失败:', error);
-    }
-    
-    // 3. 尝试获取主域名的 Cookie
-    try {
-      const parts = domain.split('.');
-      if (parts.length > 2) {
-        const rootDomain = '.' + parts.slice(-2).join('.');
-        const rootCookies = await chrome.cookies.getAll({ domain: rootDomain });
-        cookieSets.push(rootCookies);
-      }
-    } catch (error) {
-      console.warn('按根域名获取 Cookie 失败:', error);
-    }
-    
-    // 4. 通过 content script 获取 document.cookie
-    try {
-      if (tab.id) {
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => {
-            try {
-              return document.cookie;
-            } catch (error) {
-              return '';
-            }
-          }
-        });
-        
-        const documentCookies = results[0]?.result || '';
-        if (documentCookies) {
-          console.log('从 document.cookie 获取到:', documentCookies);
-          // 解析 document.cookie 字符串并转换为 Cookie 对象
-          const parsedCookies = parseDocumentCookies(documentCookies, domain);
-          cookieSets.push(parsedCookies);
-        }
-      }
-    } catch (error) {
-      console.warn('通过 content script 获取 Cookie 失败:', error);
-    }
-    
-    // 合并并去重所有 Cookie
-    const allCookies = new Map<string, chrome.cookies.Cookie>();
-    
-    cookieSets.forEach(cookies => {
-      cookies.forEach(cookie => {
-        const key = `${cookie.name}-${cookie.domain}-${cookie.path}`;
-        if (!allCookies.has(key) || cookie.value) {
-          allCookies.set(key, cookie);
-        }
-      });
-    });
-    
-    const finalCookies = Array.from(allCookies.values());
-    console.log(`成功获取 ${finalCookies.length} 个 Cookie`);
-    
-    return finalCookies;
+    const cookies = await chrome.cookies.getAll({ domain });
+    console.log(`获取到 ${cookies.length} 个 Cookie`);
+    return cookies;
   } catch (error) {
     throw new SessionManagerError(
       `读取 Cookies 失败: ${error instanceof Error ? error.message : '未知错误'}`,
       'GET_COOKIES_FAILED'
     );
   }
-}
-
-/**
- * 解析 document.cookie 字符串为 Cookie 对象数组
- */
-function parseDocumentCookies(cookieString: string, domain: string): chrome.cookies.Cookie[] {
-  if (!cookieString) return [];
-  
-  const cookies: chrome.cookies.Cookie[] = [];
-  const cookiePairs = cookieString.split(';');
-  
-  cookiePairs.forEach(pair => {
-    const [name, value] = pair.trim().split('=');
-    if (name && value !== undefined) {
-      cookies.push({
-        name: name.trim(),
-        value: value.trim(),
-        domain: domain,
-        hostOnly: false,
-        path: '/',
-        secure: false,
-        httpOnly: false,
-        sameSite: 'no_restriction',
-        session: true,
-        storeId: 'default'
-      });
-    }
-  });
-  
-  return cookies;
 }
 
 /**
@@ -232,13 +124,11 @@ async function getSessionStorage(): Promise<Record<string, string>> {
 
 /**
  * 获取当前页面的完整会话数据
- * 包括 Cookies, LocalStorage, SessionStorage
  */
 export async function getSession(): Promise<SessionData> {
   try {
     const domain = await getCurrentDomain();
     
-    // 并行获取所有数据以提高性能
     const [cookies, localStorage, sessionStorage] = await Promise.all([
       getCookies(domain),
       getLocalStorage(),
@@ -274,45 +164,110 @@ export async function getSession(): Promise<SessionData> {
 }
 
 /**
- * 设置指定的 Cookies
+ * 通过 JavaScript 脚本注入设置 Cookie 数据
+ * 使用 document.cookie 方式，确保在开发者工具中可见
  */
 async function setCookies(cookies: chrome.cookies.Cookie[], targetDomain: string): Promise<void> {
   try {
-    const setPromises = cookies.map(async (cookie) => {
-      // 构建 cookie 设置参数
-      const details: chrome.cookies.SetDetails = {
-        url: `https://${targetDomain}${cookie.path || '/'}`,
-        name: cookie.name,
-        value: cookie.value,
-        domain: cookie.domain,
-        path: cookie.path,
-        secure: cookie.secure,
-        httpOnly: cookie.httpOnly,
-        sameSite: cookie.sameSite,
-      };
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      throw new SessionManagerError('无法获取当前标签页 ID', 'NO_TAB_ID');
+    }
 
-      // 如果有过期时间，设置过期时间
-      if (cookie.expirationDate) {
-        details.expirationDate = cookie.expirationDate;
-      }
+    if (!tab.url) {
+      throw new SessionManagerError('无法获取当前标签页 URL', 'NO_TAB_URL');
+    }
 
-      try {
-        await chrome.cookies.set(details);
-        console.log(`Cookie 设置成功: ${cookie.name}`);
-      } catch (error) {
-        console.warn(`Cookie 设置失败: ${cookie.name}`, error);
-        throw new SessionManagerError(
-          `设置 Cookie "${cookie.name}" 失败: ${error instanceof Error ? error.message : '未知错误'}`,
-          'SET_COOKIE_FAILED'
-        );
-      }
+    console.log(`🍪 [Cookie 设置] 开始设置 ${cookies.length} 个 Cookie 到域名: ${targetDomain}`);
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (cookieData: chrome.cookies.Cookie[], currentDomain: string) => {
+        try {
+          // 清除现有的 Cookie（可选，根据需求决定）
+          // document.cookie.split(";").forEach(function(c) { 
+          //   document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+          // });
+
+          let successCount = 0;
+          let errorCount = 0;
+
+          for (const cookie of cookieData) {
+            try {
+              // 构建完整的 Cookie 字符串，包含所有必要的属性
+              let cookieString = `${cookie.name}=${cookie.value}`;
+              
+              // 添加路径
+              if (cookie.path) {
+                cookieString += `; path=${cookie.path}`;
+              } else {
+                cookieString += '; path=/';
+              }
+              
+              // 添加域名（如果指定且与当前域名匹配）
+              if (cookie.domain && cookie.domain !== currentDomain) {
+                // 注意：JavaScript 只能设置当前域名或子域名的 Cookie
+                // 如果域名不匹配，可能需要调整或跳过
+                if (cookie.domain.endsWith(currentDomain) || currentDomain.endsWith(cookie.domain)) {
+                  cookieString += `; domain=${cookie.domain}`;
+                } else {
+                  console.warn(`跳过跨域 Cookie: ${cookie.name} (${cookie.domain})`);
+                  continue;
+                }
+              }
+              
+              // 添加过期时间
+              if (cookie.expirationDate) {
+                const expirationDate = new Date(cookie.expirationDate * 1000);
+                cookieString += `; expires=${expirationDate.toUTCString()}`;
+              }
+              
+              // 添加安全标志
+              if (cookie.secure) {
+                cookieString += '; secure';
+              }
+              
+              // 添加 HttpOnly 标志（注意：JavaScript 无法设置 HttpOnly，但我们可以记录）
+              if (cookie.httpOnly) {
+                console.log(`注意: Cookie ${cookie.name} 标记为 HttpOnly，JavaScript 无法设置此标志`);
+              }
+              
+              // 添加 SameSite 属性
+              if (cookie.sameSite) {
+                cookieString += `; samesite=${cookie.sameSite}`;
+              }
+
+              // 设置 Cookie
+              document.cookie = cookieString;
+              successCount++;
+              
+              console.log(`✅ Cookie 设置成功: ${cookie.name}=${cookie.value}`);
+            } catch (cookieError) {
+              console.error(`❌ Cookie 设置失败: ${cookie.name}`, cookieError);
+              errorCount++;
+            }
+          }
+
+          console.log(`🍪 Cookie 设置完成: 成功 ${successCount} 个, 失败 ${errorCount} 个`);
+          return { 
+            success: true, 
+            successCount, 
+            errorCount, 
+            total: cookieData.length 
+          };
+        } catch (error) {
+          console.error('Cookie 设置过程中发生错误:', error);
+          throw error;
+        }
+      },
+      args: [cookies, targetDomain]
     });
 
-    await Promise.allSettled(setPromises);
-    console.log(`成功处理 ${cookies.length} 个 Cookie`);
+    console.log(`🍪 [Cookie 设置] 脚本执行完成，Cookie 数据已应用到页面`);
   } catch (error) {
+    console.error(`💥 [Cookie 设置] 设置失败:`, error);
     throw new SessionManagerError(
-      `批量设置 Cookies 失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      `设置 Cookie 失败: ${error instanceof Error ? error.message : '未知错误'}`,
       'SET_COOKIES_FAILED'
     );
   }
@@ -332,14 +287,10 @@ async function setLocalStorage(data: Record<string, string>): Promise<void> {
       target: { tabId: tab.id },
       func: (storageData: Record<string, string>) => {
         try {
-          // 清空现有 localStorage
           localStorage.clear();
-          
-          // 设置新数据
           for (const [key, value] of Object.entries(storageData)) {
             localStorage.setItem(key, value);
           }
-          
           console.log(`LocalStorage 设置成功，共 ${Object.keys(storageData).length} 项`);
           return { success: true, count: Object.keys(storageData).length };
         } catch (error) {
@@ -373,14 +324,10 @@ async function setSessionStorage(data: Record<string, string>): Promise<void> {
       target: { tabId: tab.id },
       func: (storageData: Record<string, string>) => {
         try {
-          // 清空现有 sessionStorage
           sessionStorage.clear();
-          
-          // 设置新数据
           for (const [key, value] of Object.entries(storageData)) {
             sessionStorage.setItem(key, value);
           }
-          
           console.log(`SessionStorage 设置成功，共 ${Object.keys(storageData).length} 项`);
           return { success: true, count: Object.keys(storageData).length };
         } catch (error) {
@@ -402,27 +349,16 @@ async function setSessionStorage(data: Record<string, string>): Promise<void> {
 
 /**
  * 应用会话数据到当前页面
- * 包括 Cookies, LocalStorage, SessionStorage
  */
 export async function setSession(sessionData: SessionData): Promise<void> {
   try {
-    // 验证输入数据
     if (!validateSessionData(sessionData)) {
       throw new SessionManagerError('会话数据格式无效', 'INVALID_SESSION_DATA');
     }
 
-    // 获取当前域名以验证匹配
     const currentDomain = await getCurrentDomain();
     
-    // 可选：验证域名匹配（可以注释掉以支持跨域应用）
-    // if (sessionData.domain !== currentDomain) {
-    //   throw new SessionManagerError(
-    //     `域名不匹配: 会话数据来自 ${sessionData.domain}，当前页面为 ${currentDomain}`,
-    //     'DOMAIN_MISMATCH'
-    //   );
-    // }
-
-    console.log('开始应用会话数据:', {
+    console.log('🚀 [会话应用] 开始应用会话数据:', {
       targetDomain: currentDomain,
       sourceDomain: sessionData.domain,
       cookiesCount: sessionData.cookies.length,
@@ -430,30 +366,42 @@ export async function setSession(sessionData: SessionData): Promise<void> {
       sessionStorageKeys: Object.keys(sessionData.sessionStorage).length
     });
 
-    // 并行应用所有数据以提高性能
+    // 并行应用所有数据
     const results = await Promise.allSettled([
       setCookies(sessionData.cookies, currentDomain),
       setLocalStorage(sessionData.localStorage),
       setSessionStorage(sessionData.sessionStorage)
     ]);
 
-    // 检查结果并报告任何失败
+    // 分析结果
+    const operations = ['Cookies', 'LocalStorage', 'SessionStorage'];
+    const successes: string[] = [];
     const failures: string[] = [];
+    
     results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        const operations = ['Cookies', 'LocalStorage', 'SessionStorage'];
-        failures.push(`${operations[index]}: ${result.reason.message}`);
+      const operation = operations[index];
+      
+      if (result.status === 'fulfilled') {
+        successes.push(operation);
+        console.log(`✅ [会话应用] ${operation} 应用成功`);
+      } else {
+        const errorMsg = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        failures.push(`${operation}: ${errorMsg}`);
+        console.error(`❌ [会话应用] ${operation} 应用失败:`, result.reason);
       }
     });
 
-    if (failures.length > 0) {
-      throw new SessionManagerError(
-        `部分会话数据应用失败: ${failures.join('; ')}`,
-        'PARTIAL_SESSION_APPLY_FAILED'
-      );
+    console.log('📊 会话数据应用结果:', { 
+      成功: successes, 
+      失败: failures.length > 0 ? failures : '无',
+      总计: `${successes.length}/${operations.length} 成功`
+    });
+
+    if (successes.includes('Cookies') && sessionData.cookies.length > 0) {
+      console.log(`💡 [提示] Cookie 已设置完成，如果页面没有反应，请尝试刷新页面 (F5) 来查看效果`);
+      console.log(`💡 [提示] 你也可以打开开发者工具 -> Application -> Cookies 查看设置的 Cookie`);
     }
 
-    console.log('会话数据应用成功');
   } catch (error) {
     if (error instanceof SessionManagerError) {
       throw error;

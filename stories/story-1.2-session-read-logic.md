@@ -17,6 +17,7 @@
 - **Storage API**: 使用 `chrome.storage.local` 和 `chrome.storage.session`
 - **权限**: 确保 manifest 中包含必要的权限
 - **类型安全**: 使用 TypeScript 定义数据结构
+- **⚠️ 限制说明**: HttpOnly Cookie 无法被 JavaScript 读取，这是浏览器的安全限制
 
 ### 数据结构设计
 ```typescript
