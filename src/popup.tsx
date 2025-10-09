@@ -61,7 +61,7 @@ function IndexPopup() {
       // 更新剪贴板信息
       setClipboardInfo({ hasContent: true, isJSON: true })
       
-      updateStatus(`✅ 会话已复制！域名: ${sessionData.domain}`, "success", 3000)
+      updateStatus(`会话已复制！域名: ${sessionData.domain}`, "success", 3000)
       
     } catch (error) {
       console.error("复制会话失败:", error)
@@ -74,7 +74,7 @@ function IndexPopup() {
         errorMessage = error.message
       }
       
-      updateStatus(`❌ ${errorMessage}`, "error", 5000)
+      updateStatus(`${errorMessage}`, "error", 5000)
     } finally {
       setIsLoading(false)
     }
@@ -113,7 +113,7 @@ function IndexPopup() {
         errorMessage = error.message
       }
       
-      updateStatus(`❌ ${errorMessage}`, "error", showManualOption ? 0 : 5000)
+      updateStatus(`${errorMessage}`, "error", showManualOption ? 0 : 5000)
       
       if (showManualOption) {
         setShowManualInput(true)
@@ -144,7 +144,7 @@ function IndexPopup() {
     // 应用会话数据
     await setSession(sessionData)
     
-    updateStatus(`✅ 会话已应用！来源: ${sessionData.domain}`, "success", 3000)
+    updateStatus(`会话已应用！来源: ${sessionData.domain}`, "success", 3000)
     
     // 关闭手动输入界面
     setShowManualInput(false)
@@ -153,7 +153,7 @@ function IndexPopup() {
 
   const handleManualApply = async () => {
     if (!manualSessionData.trim()) {
-      updateStatus("❌ 请输入会话数据", "error", 3000)
+      updateStatus("请输入会话数据", "error", 3000)
       return
     }
 
@@ -173,7 +173,7 @@ function IndexPopup() {
         errorMessage = error.message
       }
       
-      updateStatus(`❌ ${errorMessage}`, "error", 5000)
+      updateStatus(`${errorMessage}`, "error", 5000)
     } finally {
       setIsLoading(false)
     }
