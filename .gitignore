@@ -28,7 +28,6 @@ yarn-error.log*
 out/
 build/
 dist/
-.bmad-core/
 
 # plasmo - https://www.plasmo.com
 .plasmo
