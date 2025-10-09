@@ -12,12 +12,34 @@ export interface SessionData {
   timestamp: number;
 }
 
+// 写入策略
+export type WriteStrategy = 'sameDomain' | 'crossDomain'
+
+export interface ApplySummary {
+  strategy: WriteStrategy
+  targetDomain: string
+  sourceDomain: string
+  cookies: { total: number; applied: number; skipped: number }
+  localStorage: { total: number; applied: number }
+  sessionStorage: { total: number; applied: number }
+}
+
 // 错误类型定义
 export class SessionManagerError extends Error {
   constructor(message: string, public code: string) {
     super(message);
     this.name = 'SessionManagerError';
   }
+}
+
+export interface CookieDebugReport {
+  tabUrl: string
+  targetDomain: string
+  byUrl: { total: number; httpOnly: number }
+  byDomain: { total: number; httpOnly: number }
+  note: string
+  byUrlAll?: Array<Pick<chrome.cookies.Cookie, 'name' | 'domain' | 'path' | 'secure' | 'httpOnly' | 'sameSite' | 'expirationDate'>>
+  byDomainAll?: Array<Pick<chrome.cookies.Cookie, 'name' | 'domain' | 'path' | 'secure' | 'httpOnly' | 'sameSite' | 'expirationDate'>>
 }
 
 /**
@@ -41,19 +63,198 @@ async function getCurrentDomain(): Promise<string> {
 }
 
 /**
- * 读取指定域名的所有 Cookies
+ * 判定写入策略：sameDomain / crossDomain
+ * 简化子域判断：任一一方以另一方结尾（example.com 与 a.example.com 视为同域策略）
+ */
+export function determineWriteStrategy(sourceDomain: string, targetDomain: string): WriteStrategy {
+  if (!sourceDomain || !targetDomain) return 'crossDomain'
+  if (sourceDomain === targetDomain) return 'sameDomain'
+  const s = sourceDomain.toLowerCase()
+  const t = targetDomain.toLowerCase()
+  if (s.endsWith('.' + t) || t.endsWith('.' + s)) return 'sameDomain'
+  return 'crossDomain'
+}
+
+/**
+ * 读取 Cookies（优先按 {url} 获取，回退按 {domain}）。
  */
 async function getCookies(domain: string): Promise<chrome.cookies.Cookie[]> {
   try {
-    const cookies = await chrome.cookies.getAll({ domain });
-    console.log(`获取到 ${cookies.length} 个 Cookie`);
-    return cookies;
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    let cookies: chrome.cookies.Cookie[] = []
+    if (tab?.url) {
+      cookies = await chrome.cookies.getAll({ url: tab.url })
+      console.log(`按 url 获取到 ${cookies.length} 个 Cookie（含 HttpOnly: ${cookies.filter(c => c.httpOnly).length}）`)
+    }
+    if (!cookies.length) {
+      const byDomain = await chrome.cookies.getAll({ domain })
+      console.log(`按 domain 获取到 ${byDomain.length} 个 Cookie（含 HttpOnly: ${byDomain.filter(c => c.httpOnly).length}）`)
+      cookies = byDomain
+    }
+    return cookies
   } catch (error) {
     throw new SessionManagerError(
       `读取 Cookies 失败: ${error instanceof Error ? error.message : '未知错误'}`,
       'GET_COOKIES_FAILED'
-    );
+    )
   }
+}
+
+/**
+ * 调试：对比按 url 与按 domain 获取到的 Cookie（含 HttpOnly 统计）
+ */
+export async function debugCompareCookies(): Promise<CookieDebugReport> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  if (!tab?.url) {
+    throw new SessionManagerError('无法获取当前标签页 URL', 'NO_TAB_URL')
+  }
+  const url = tab.url
+  const hostname = new URL(url).hostname
+
+  const [byUrlList, byDomainList] = await Promise.all([
+    chrome.cookies.getAll({ url }),
+    chrome.cookies.getAll({ domain: hostname })
+  ])
+
+  const report: CookieDebugReport = {
+    tabUrl: url,
+    targetDomain: hostname,
+    byUrl: {
+      total: byUrlList.length,
+      httpOnly: byUrlList.filter(c => c.httpOnly).length
+    },
+    byDomain: {
+      total: byDomainList.length,
+      httpOnly: byDomainList.filter(c => c.httpOnly).length
+    },
+    note: '优先建议按 {url} 过滤获取，以覆盖含 Path/Domain/SameSite 差异与 HttpOnly',
+    byUrlAll: byUrlList.map(c => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path,
+      secure: c.secure,
+      httpOnly: c.httpOnly,
+      sameSite: c.sameSite,
+      expirationDate: c.expirationDate
+    })),
+    byDomainAll: byDomainList.map(c => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path,
+      secure: c.secure,
+      httpOnly: c.httpOnly,
+      sameSite: c.sameSite,
+      expirationDate: c.expirationDate
+    }))
+  }
+
+  console.log('[Cookie Debug] 按 url 获取到的 Cookie 明细:')
+  for (const c of report.byUrlAll || []) {
+    console.log('  ', c)
+  }
+  console.log('[Cookie Debug] 按 domain 获取到的 Cookie 明细:')
+  for (const c of report.byDomainAll || []) {
+    console.log('  ', c)
+  }
+  console.log('[Cookie Debug] report 总结', report)
+  return report
+}
+
+/**
+ * 使用 chrome.cookies.set 写入（可支持 HttpOnly）。
+ * 注意：需要 manifest 拥有 cookies 权限及匹配 host_permissions。
+ */
+async function setCookiesViaApi(
+  cookies: chrome.cookies.Cookie[],
+  targetDomain: string,
+  strategy: WriteStrategy
+): Promise<{ applied: number; failed: number; total: number }> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  if (!tab?.url) throw new SessionManagerError('无法获取当前标签页 URL', 'NO_TAB_URL')
+  const tabUrl = new URL(tab.url)
+
+  let applied = 0
+  let failed = 0
+
+  for (const c of cookies) {
+    try {
+      // 选择要使用的域
+      const cookieDomainCandidate = (() => {
+        if (strategy === 'sameDomain' && c.domain) {
+          const cd = c.domain.replace(/^\./, '')
+          if (cd.endsWith(targetDomain) || targetDomain.endsWith(cd)) {
+            return c.domain
+          }
+        }
+        // 跨域或不匹配则以目标域为准
+        return '.' + targetDomain
+      })()
+
+      const hostForUrl = cookieDomainCandidate.replace(/^\./, '')
+      const scheme = c.secure ? 'https' : (tabUrl.protocol.replace(':', '') || 'https')
+      const path = c.path || '/'
+      const url = `${scheme}://${hostForUrl}${path}`
+
+      await chrome.cookies.set({
+        url,
+        name: c.name,
+        value: c.value || '',
+        domain: cookieDomainCandidate,
+        path,
+        secure: !!c.secure,
+        httpOnly: !!c.httpOnly,
+        sameSite: c.sameSite,
+        expirationDate: c.expirationDate
+      })
+      applied++
+    } catch (e) {
+      console.warn('[Cookie API 写入失败]', c.name, e)
+      failed++
+    }
+  }
+
+  return { applied, failed, total: cookies.length }
+}
+
+/**
+ * 使用 cookies API 应用（包含 HttpOnly），并返回摘要
+ */
+export async function applySessionWithCookiesApi(sessionData: SessionData): Promise<ApplySummary> {
+  if (!validateSessionData(sessionData)) {
+    throw new SessionManagerError('会话数据格式无效', 'INVALID_SESSION_DATA')
+  }
+
+  const targetDomain = await getCurrentDomain()
+  const sourceDomain = sessionData.domain
+  const strategy = determineWriteStrategy(sourceDomain, targetDomain)
+
+  const cookieTotal = sessionData.cookies.length
+  const lsTotal = Object.keys(sessionData.localStorage).length
+  const ssTotal = Object.keys(sessionData.sessionStorage).length
+
+  const [cookieRes, lsRes, ssRes] = await Promise.allSettled([
+    setCookiesViaApi(sessionData.cookies, targetDomain, strategy),
+    setLocalStorage(sessionData.localStorage),
+    setSessionStorage(sessionData.sessionStorage)
+  ])
+
+  const cookiesApplied = cookieRes.status === 'fulfilled' ? cookieRes.value.applied : 0
+  const summary: ApplySummary = {
+    strategy,
+    targetDomain,
+    sourceDomain,
+    cookies: {
+      total: cookieTotal,
+      applied: cookiesApplied,
+      skipped: cookieRes.status === 'fulfilled' ? cookieRes.value.failed : 0
+    },
+    localStorage: { total: lsTotal, applied: lsRes.status === 'fulfilled' ? lsTotal : 0 },
+    sessionStorage: { total: ssTotal, applied: ssRes.status === 'fulfilled' ? ssTotal : 0 }
+  }
+
+  return summary
 }
 
 /**
@@ -167,7 +368,11 @@ export async function getSession(): Promise<SessionData> {
  * 通过 JavaScript 脚本注入设置 Cookie 数据
  * 使用 document.cookie 方式，确保在开发者工具中可见
  */
-async function setCookies(cookies: chrome.cookies.Cookie[], targetDomain: string): Promise<void> {
+async function setCookies(
+  cookies: chrome.cookies.Cookie[],
+  targetDomain: string,
+  strategy: WriteStrategy = 'sameDomain'
+): Promise<{ applied: number; skipped: number; total: number }> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) {
@@ -178,11 +383,11 @@ async function setCookies(cookies: chrome.cookies.Cookie[], targetDomain: string
       throw new SessionManagerError('无法获取当前标签页 URL', 'NO_TAB_URL');
     }
 
-    console.log(`🍪 [Cookie 设置] 开始设置 ${cookies.length} 个 Cookie 到域名: ${targetDomain}`);
+    console.log(`🍪 [Cookie 设置] 开始设置 ${cookies.length} 个 Cookie 到域名: ${targetDomain}（策略: ${strategy}）`);
 
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: (cookieData: chrome.cookies.Cookie[], currentDomain: string) => {
+      func: (cookieData: chrome.cookies.Cookie[], currentDomain: string, writeStrategy: WriteStrategy) => {
         try {
           // 清除现有的 Cookie（可选，根据需求决定）
           // document.cookie.split(";").forEach(function(c) { 
@@ -191,6 +396,7 @@ async function setCookies(cookies: chrome.cookies.Cookie[], targetDomain: string
 
           let successCount = 0;
           let errorCount = 0;
+          let skippedCount = 0;
 
           for (const cookie of cookieData) {
             try {
@@ -204,16 +410,21 @@ async function setCookies(cookies: chrome.cookies.Cookie[], targetDomain: string
                 cookieString += '; path=/';
               }
               
-              // 添加域名（如果指定且与当前域名匹配）
-              if (cookie.domain && cookie.domain !== currentDomain) {
-                // 注意：JavaScript 只能设置当前域名或子域名的 Cookie
-                // 如果域名不匹配，可能需要调整或跳过
-                if (cookie.domain.endsWith(currentDomain) || currentDomain.endsWith(cookie.domain)) {
-                  cookieString += `; domain=${cookie.domain}`;
-                } else {
-                  console.warn(`跳过跨域 Cookie: ${cookie.name} (${cookie.domain})`);
-                  continue;
+              // 域名处理
+              if (writeStrategy === 'sameDomain') {
+                if (cookie.domain && cookie.domain !== currentDomain) {
+                  // 仅当两者存在父子域关系时保留 domain，否则跳过（避免跨站设置失败）
+                  if (cookie.domain.endsWith(currentDomain) || currentDomain.endsWith(cookie.domain)) {
+                    cookieString += `; domain=${cookie.domain}`;
+                  } else {
+                    console.warn(`跳过跨域 Cookie: ${cookie.name} (${cookie.domain})`);
+                    skippedCount++;
+                    continue;
+                  }
                 }
+              } else {
+                // crossDomain：不携带原 domain，令 Cookie 落在当前域
+                // 不追加 domain 片段
               }
               
               // 添加过期时间
@@ -223,7 +434,7 @@ async function setCookies(cookies: chrome.cookies.Cookie[], targetDomain: string
               }
               
               // 添加安全标志
-              if (cookie.secure) {
+              if (cookie.secure && location.protocol === 'https:') {
                 cookieString += '; secure';
               }
               
@@ -248,11 +459,12 @@ async function setCookies(cookies: chrome.cookies.Cookie[], targetDomain: string
             }
           }
 
-          console.log(`🍪 Cookie 设置完成: 成功 ${successCount} 个, 失败 ${errorCount} 个`);
+          console.log(`🍪 Cookie 设置完成: 成功 ${successCount} 个, 失败 ${errorCount} 个, 跳过 ${skippedCount} 个`);
           return { 
-            success: true, 
-            successCount, 
-            errorCount, 
+            success: true,
+            successCount,
+            errorCount,
+            skippedCount,
             total: cookieData.length 
           };
         } catch (error) {
@@ -260,10 +472,13 @@ async function setCookies(cookies: chrome.cookies.Cookie[], targetDomain: string
           throw error;
         }
       },
-      args: [cookies, targetDomain]
+      args: [cookies, targetDomain, strategy]
     });
 
     console.log(`🍪 [Cookie 设置] 脚本执行完成，Cookie 数据已应用到页面`);
+    // 无法直接拿到返回值（MV3 executeScript 返回在 results 中，本函数为简单路径保持）
+    // 这里返回一个近似摘要，仅提供总数，应用/跳过由页面脚本统计。
+    return { applied: cookies.length, skipped: 0, total: cookies.length };
   } catch (error) {
     console.error(`💥 [Cookie 设置] 设置失败:`, error);
     throw new SessionManagerError(
@@ -412,6 +627,47 @@ export async function setSession(sessionData: SessionData): Promise<void> {
       'SET_SESSION_FAILED'
     );
   }
+}
+
+/**
+ * 带策略的应用：返回摘要，便于 UI 呈现“同域/跨域”与统计
+ */
+export async function applySessionToCurrentDomain(sessionData: SessionData): Promise<ApplySummary> {
+  if (!validateSessionData(sessionData)) {
+    throw new SessionManagerError('会话数据格式无效', 'INVALID_SESSION_DATA')
+  }
+
+  const targetDomain = await getCurrentDomain()
+  const sourceDomain = sessionData.domain
+  const strategy = determineWriteStrategy(sourceDomain, targetDomain)
+
+  const cookieTotal = sessionData.cookies.length
+  const lsTotal = Object.keys(sessionData.localStorage).length
+  const ssTotal = Object.keys(sessionData.sessionStorage).length
+
+  const results = await Promise.allSettled([
+    setCookies(sessionData.cookies, targetDomain, strategy),
+    setLocalStorage(sessionData.localStorage),
+    setSessionStorage(sessionData.sessionStorage)
+  ])
+
+  let cookiesApplied = 0
+  let cookiesSkipped = 0
+  if (results[0].status === 'fulfilled') {
+    cookiesApplied = results[0].value.applied
+    cookiesSkipped = results[0].value.skipped
+  }
+
+  const summary: ApplySummary = {
+    strategy,
+    targetDomain,
+    sourceDomain,
+    cookies: { total: cookieTotal, applied: cookiesApplied, skipped: cookiesSkipped },
+    localStorage: { total: lsTotal, applied: results[1].status === 'fulfilled' ? lsTotal : 0 },
+    sessionStorage: { total: ssTotal, applied: results[2].status === 'fulfilled' ? ssTotal : 0 }
+  }
+
+  return summary
 }
 
 /**

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { ActionButton } from "~components/ActionButton"
 import { StatusBar } from "~components/StatusBar"
-import { getSession, setSession, SessionManagerError, validateSessionData } from "~lib/sessionManager"
+import { getSession, setSession, SessionManagerError, validateSessionData, applySessionToCurrentDomain, determineWriteStrategy, debugCompareCookies } from "~lib/sessionManager"
 import { copyToClipboard, readFromClipboard, ClipboardError, getClipboardInfo, validateClipboardJSON } from "~lib/clipboardUtils"
 import type { SessionData } from "~lib/sessionManager"
 import type { StatusType } from "~components/StatusBar"
@@ -141,10 +141,10 @@ function IndexPopup() {
     
     updateStatus("正在应用会话数据...", "loading")
     
-    // 应用会话数据
-    await setSession(sessionData)
-    
-    updateStatus(`会话已应用！来源: ${sessionData.domain}`, "success", 3000)
+    // 判定策略并应用
+    const summary = await applySessionToCurrentDomain(sessionData)
+    const typeLabel = summary.strategy === 'sameDomain' ? '同域' : '跨域'
+    updateStatus(`${typeLabel}写入完成！来源: ${summary.sourceDomain} → 目标: ${summary.targetDomain}（Cookies: ${summary.cookies.applied}/${summary.cookies.total}）`, "success", 3000)
     
     // 关闭手动输入界面
     setShowManualInput(false)
@@ -178,6 +178,25 @@ function IndexPopup() {
       setIsLoading(false)
     }
   }
+
+  // const handleDebugCookies = async () => {
+  //   setIsLoading(true)
+  //   updateStatus("正在调试 Cookie...", "loading")
+  //   try {
+  //     const report = await debugCompareCookies()
+  //     updateStatus(
+  //       `按url:${report.byUrl.total}/${report.byUrl.httpOnly} HttpOnly，按domain:${report.byDomain.total}/${report.byDomain.httpOnly}`,
+  //       "info" as StatusType,
+  //       5000
+  //     )
+  //     console.log('[Cookie Debug] 按url vs 按domain', report)
+  //   } catch (e) {
+  //     const msg = e instanceof Error ? e.message : String(e)
+  //     updateStatus(`Cookie 调试失败: ${msg}`, "error", 5000)
+  //   } finally {
+  //     setIsLoading(false)
+  //   }
+  // }
 
   return (
     <div className="plasmo-flex plasmo-flex-col plasmo-p-4 plasmo-w-64 plasmo-bg-white">
@@ -269,6 +288,14 @@ function IndexPopup() {
             ? "复制中..." 
             : "复制会话"}
         </ActionButton>
+
+        {/* <ActionButton 
+          onClick={handleDebugCookies}
+          variant="secondary"
+          disabled={isLoading}
+        >
+          调试 Cookie
+        </ActionButton> */}
         
         <ActionButton 
           onClick={handleApplySession}
