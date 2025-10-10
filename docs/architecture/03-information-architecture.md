@@ -31,7 +31,7 @@ graph TD
 
 ### 关键元素:
 
-1. **标题**: "Incognito Session Bridge"
+1. **标题**: "Incognito Session Copier"
 
 2. **主操作区**:
    - 一个清晰的主按钮: "Copy Session"

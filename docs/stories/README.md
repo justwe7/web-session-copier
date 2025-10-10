@@ -1,6 +1,6 @@
 # 用户故事索引
 
-本目录包含了 Incognito Session Bridge 项目的所有开发用户故事，基于 PRD 中的史诗详情创建。
+本目录包含了 Incognito Session Copier 项目的所有开发用户故事，基于 PRD 中的史诗详情创建。
 
 ## Epic 1: MVP - Core Session Transfer Functionality
 

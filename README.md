@@ -1,4 +1,4 @@
-## 项目简介：Incognito Session Bridge
+## 项目简介：Incognito Session Copier
 
 一个用于在网站之间读取与应用会话数据（Cookies、LocalStorage、SessionStorage）的浏览器扩展。定位是“轻权限、广适配”，默认不申请 `cookies` 权限，仅使用页面上下文的 `document.cookie` 与脚本注入来完成大多数同域/子域写入场景；并提供可选的调试与增强能力。
 

@@ -1,4 +1,4 @@
-# Incognito Session Bridge 前端架构文档
+# Incognito Session Copier 前端架构文档
 
 ## 1. 模板和框架选择
 

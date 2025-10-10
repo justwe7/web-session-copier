@@ -1,4 +1,4 @@
-# Incognito Session Bridge 产品需求文档 (PRD)
+# Incognito Session Copier 产品需求文档 (PRD)
 
 ## 1. 目标与背景 (Goals and Background Context)
 

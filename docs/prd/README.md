@@ -1,4 +1,4 @@
-# Incognito Session Bridge PRD - 分片文档索引
+# Incognito Session Copier PRD - 分片文档索引
 
 本目录包含了完整 PRD 文档按章节拆分后的独立文件，便于单独阅读和维护。
 

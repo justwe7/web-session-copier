@@ -102,7 +102,7 @@ BMad Master Task Executor (Claude Sonnet 4)
 - 弹出窗口更新：符合故事要求的标题和按钮布局
 
 ### Completion Notes
-- ✅ 成功更新弹出窗口 UI，包含 "Incognito Session Bridge" 标题
+- ✅ 成功更新弹出窗口 UI，包含 "Incognito Session Copier" 标题
 - ✅ 实现了 "复制会话" 和 "应用会话" 两个主要按钮
 - ✅ 创建了可复用的 ActionButton 组件，支持主要和次要样式
 - ✅ 使用 Tailwind CSS 实现了专业的开发者工具风格

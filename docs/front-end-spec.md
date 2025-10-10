@@ -1,8 +1,8 @@
-# Incognito Session Bridge UI/UX Specification
+# Incognito Session Copier UI/UX Specification
 
 ## 1. Introduction
 
-[cite_start]This document defines the user experience goals, information architecture, user flows, and visual design specifications for the Incognito Session Bridge's user interface. [cite: 676] [cite_start]It serves as the foundation for visual design and frontend development, ensuring a cohesive and user-centered experience. [cite: 677]
+[cite_start]This document defines the user experience goals, information architecture, user flows, and visual design specifications for the Incognito Session Copier's user interface. [cite: 676] [cite_start]It serves as the foundation for visual design and frontend development, ensuring a cohesive and user-centered experience. [cite: 677]
 
 ### Overall UX Goals & Principles
 
@@ -115,7 +115,7 @@ graph TD
 
 关键元素:
 
-标题: "Incognito Session Bridge"
+标题: "Incognito Session Copier"
 
 主操作区:
 
