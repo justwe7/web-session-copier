@@ -203,7 +203,7 @@ function IndexPopup() {
       {/* 标题 */}
       <div className="plasmo-mb-4 plasmo-text-center">
         <h1 className="plasmo-text-lg plasmo-font-semibold plasmo-text-gray-800 plasmo-mb-1">
-          Incognito Session Bridge
+          Web Session Copier
         </h1>
         <p className="plasmo-text-xs plasmo-text-gray-500">
           管理隐身会话数据

@@ -1,6 +1,6 @@
 {
-  "name": "session-bridge",
-  "displayName": "Session Copier",
+  "name": "web-session-copier",
+  "displayName": "web-session-copier",
   "version": "0.0.1",
   "description": "vibe",
   "author": "ilihuaxi@gmail.com",
