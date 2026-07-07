@@ -2,6 +2,10 @@
 
 一个用于在网站之间读取与应用会话数据（Cookies、LocalStorage、SessionStorage）的浏览器扩展。定位是“轻权限、广适配”，默认不申请 `cookies` 权限，仅使用页面上下文的 `document.cookie` 与脚本注入来完成大多数同域/子域写入场景；并提供可选的调试与增强能力。
 
+### 下载
+- [下载最新 Release（zip）](https://github.com/justwe7/web-session-copier/releases/latest)
+- [查看所有 Releases](https://github.com/justwe7/web-session-copier/releases)
+
 ### 核心功能
 - 复制会话到剪贴板：读取当前标签页的会话数据（含 Cookies、LocalStorage、SessionStorage）并以 JSON 复制。
 - 应用会话到当前站点：将剪贴板中的会话写回当前站点。
@@ -26,6 +30,9 @@
 - 无法设置或读取 HttpOnly（仅 `document.cookie` 模式）；若需写入 HttpOnly，需启用 `chrome.cookies` 权限并使用增强 API（本项目已留有实现但默认不启用）。
 - 不能跨站设置 Cookies（不同 eTLD+1）。
 - `secure` 仅在 https 页面生效；严格的 SameSite、分区/第三方 Cookie、容器/隐私策略可能导致写入被丢弃。
+
+### 演示
+![录屏演示](./record.gif)
 
 This is a [Plasmo extension](https://docs.plasmo.com/) project bootstrapped with [`plasmo init`](https://www.npmjs.com/package/plasmo).
 

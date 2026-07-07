@@ -1,0 +1,51 @@
+name: "Release (Build & Upload)"
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Package
+        run: npm run package
+
+      - name: Rename artifact with tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [ ! -f "build/chrome-mv3-prod.zip" ]; then
+            echo "Missing build/chrome-mv3-prod.zip"
+            ls -la build || true
+            exit 1
+          fi
+          cp "build/chrome-mv3-prod.zip" "build/session-bridge-${TAG}.zip"
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            build/chrome-mv3-prod.zip
+            build/session-bridge-${{ github.ref_name }}.zip
