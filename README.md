@@ -3,6 +3,7 @@
 一个用于**复制并应用 Web 会话数据**（Cookies、LocalStorage、SessionStorage）的浏览器扩展，面向多账号/多环境/联调等需要频繁切换登录态的场景。
 
 ### 为什么做 / 解决什么痛点
+- **免密码共享**：可将会话数据以 JSON 形式分享给其他朋友/同事，用于联调或复现问题（分享的是登录态，不是密码）
 - **省时间**：反复登录、开无痕、切账号、切环境很耗时
 - **降出错**：手动拷贝 Cookie/Storage 容易遗漏、属性不匹配导致“写了但没生效”
 - **好排查**：SameSite/secure/HttpOnly/隐私策略等限制经常导致写入被丢弃，不容易定位
@@ -56,12 +57,6 @@ pnpm dev
 npm run dev
 ```
 
-Open your browser and load the appropriate development build. For example, if you are developing for the chrome browser, using manifest v3, use: `build/chrome-mv3-dev`.
-
-You can start editing the popup by modifying `popup.tsx`. It should auto-update as you make changes. To add an options page, simply add a `options.tsx` file to the root of the project, with a react component default exported. Likewise to add a content page, add a `content.ts` file to the root of the project, importing some module and do some logic, then reload the extension on your browser.
-
-For further guidance, [visit our Documentation](https://docs.plasmo.com/)
-
 ## Making production build
 
 Run the following:
@@ -71,8 +66,6 @@ pnpm build
 # or
 npm run build
 ```
-
-This should create a production bundle for your extension, ready to be zipped and published to the stores.
 
 ## Submit to the webstores
 

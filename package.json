@@ -2,7 +2,7 @@
   "name": "web-session-copier",
   "displayName": "web-session-copier",
   "version": "0.0.1",
-  "description": "vibe",
+  "description": "一键复制/应用网页会话，用于账号免密分享。",
   "author": "ilihuaxi@gmail.com",
   "scripts": {
     "dev": "plasmo dev",
